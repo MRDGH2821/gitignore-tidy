@@ -138,8 +138,23 @@ class TestSection:
             ),
             pytest.param(
                 ["a", "x", "!b/c", "b"],
-                ("a", "b", "!b/c", "x"),
+                ("a", "x", "!b/c", "b"),
                 id="no comment, negation",
+            ),
+            pytest.param(
+                ["*csv", "!*aut.csv"],
+                ("*csv", "!*aut.csv"),
+                id="negation not reordered past sibling wildcard",
+            ),
+            pytest.param(
+                ["!x", "x"],
+                ("!x", "x"),
+                id="negation before its target is left untouched",
+            ),
+            pytest.param(
+                ["z", "y", "!b", "m", "k", "!a", "c", "a"],
+                ("y", "z", "!b", "k", "m", "!a", "a", "c"),
+                id="runs between negation anchors are sorted independently",
             ),
         ),
     )
@@ -149,6 +164,26 @@ class TestSection:
             lines=expected_output,
             sorted=True,
         )
+
+    @pytest.mark.parametrize(
+        ("input", "expected_output"),
+        (
+            pytest.param(
+                ["build/", "!build/keep/", "dist/"],
+                ("build/", "dist/", "!build/keep/"),
+                id="negations sorted after non-negations",
+            ),
+            pytest.param(
+                ["a", "x", "!b/c", "b"],
+                ("a", "b", "x", "!b/c"),
+                id="negation moved to end of section",
+            ),
+        ),
+    )
+    def test_sort_negations_last_group(self, input, expected_output):
+        assert _create_section_from_normalised(header=None, lines=input).sort(
+            negations_last="group",
+        ) == _create_section_from_normalised(header=None, lines=expected_output, sorted=True)
 
     @pytest.mark.parametrize(
         ("input", "expected_output"),
@@ -205,8 +240,52 @@ class TestSections:
 class TestTidyLines:
 
     @classmethod
-    def tidy_lines(cls, input):
-        return list(tidy_lines(PlainLines(input), allow_leading_whitespace=False))
+    def tidy_lines(cls, input, negations_last=None):
+        return list(
+            tidy_lines(PlainLines(input), allow_leading_whitespace=False, negations_last=negations_last),
+        )
+
+    @pytest.mark.parametrize(
+        ("input", "expected_output"),
+        (
+            pytest.param(
+                ["# my first section", "*csv", "!*aut.csv", "", "# another", "*.pdf"],
+                ["# my first section", "*csv", "!*aut.csv", "", "# another", "*.pdf"],
+                id="readme example keeps exclusion pattern intact",
+            ),
+            pytest.param(
+                ["b", "a", "!c/**/", "z", "a"],
+                ["a", "b", "!c/**/", "z"],
+                id="issue 29 example",
+            ),
+        ),
+    )
+    def test_default_never_reorders_negations(self, input, expected_output):
+        assert self.tidy_lines(input) == expected_output
+
+    def test_negations_last_group_keeps_sections(self):
+        input = ["# a", "y", "!y/keep", "x", "# b", "build/", "!build/keep/"]
+        assert self.tidy_lines(input, negations_last="group") == [
+            "# a",
+            "x",
+            "y",
+            "!y/keep",
+            "# b",
+            "build/",
+            "!build/keep/",
+        ]
+
+    def test_negations_last_eof_collects_all_negations(self):
+        input = ["# a", "*.log", "!keep.log", "# b", "build/", "!build/x/"]
+        assert self.tidy_lines(input, negations_last="eof") == [
+            "# a",
+            "*.log",
+            "# b",
+            "build/",
+            "",
+            "!build/x/",
+            "!keep.log",
+        ]
 
     @pytest.mark.parametrize(
         ("input", "expected_output"),
@@ -229,10 +308,10 @@ class TestTidyLines:
                     "b",
                     "x",
                     "# section 2",
-                    "*.pdf",
                     "e",
-                    "!e/f/*",
                     "z",
+                    "!e/f/*",
+                    "*.pdf",
                 ],
                 id="comment, negation",
             ),
@@ -259,10 +338,10 @@ class TestTidyLines:
                     "x",
                     "",
                     "# section 2",
-                    "*.pdf",
                     "e",
-                    "!e/f/*",
                     "z",
+                    "!e/f/*",
+                    "*.pdf",
                     "",
                     "# more",
                 ],
@@ -289,10 +368,10 @@ class TestTidyLines:
                     "x",
                     "",
                     "# section 2",
-                    "*.pdf",
                     "e",
-                    "!e/f/*",
                     "z",
+                    "!e/f/*",
+                    "*.pdf",
                     "",
                     "# more",
                 ],
@@ -321,10 +400,10 @@ class TestTidyLines:
                     "x",
                     "",
                     "# section 2",
-                    "*.pdf",
                     "e",
-                    "!e/f/*",
                     "z",
+                    "!e/f/*",
+                    "*.pdf",
                     "",
                     "# more",
                 ],
@@ -383,10 +462,10 @@ class TestTidyLines:
                     "b",
                     "x",
                     "# section 2",
-                    "*.pdf",
                     "e",
-                    "!e/f/*",
                     "z",
+                    "!e/f/*",
+                    "*.pdf",
                 ],
                 id="with spaces, negation",
             ),
