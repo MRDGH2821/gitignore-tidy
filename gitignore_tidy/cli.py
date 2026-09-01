@@ -1,17 +1,12 @@
-import enum
 import pathlib
 import typing
 
 import typer
 
+from gitignore_tidy.core import NegationsLast
 from gitignore_tidy.core import tidy_file
 
 app = typer.Typer()
-
-
-class NegationsLast(str, enum.Enum):
-    group = "group"
-    eof = "eof"
 
 
 @app.command()
@@ -44,12 +39,11 @@ def tidy_files(
     """
     if files is None or len(files) < 1:
         files = [pathlib.Path(".gitignore")]
-    mode = negations_last.value if negations_last is not None else None
     [
         tidy_file(
             file,
             allow_leading_whitespace=allow_leading_whitespace,
-            negations_last=mode,
+            negations_last=negations_last,
         )
         for file in files
     ]

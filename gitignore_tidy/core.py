@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections.abc
 import dataclasses
+import enum
 import itertools
 import pathlib
 import re
@@ -11,20 +12,33 @@ from functools import cached_property
 
 from gitignore_tidy.logging import logger
 
-if sys.version_info < (3, 11):
-    from typing_extensions import Self
-else:
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
     from typing import Self  # noqa: F401
+else:
+    from typing_extensions import Self
+
+    class StrEnum(str, enum.Enum):
+        """Minimal backport of :class:`enum.StrEnum` for Python < 3.11."""
+
+        __str__ = str.__str__
+
+        def _generate_next_value_(name, start, count, last_values):  # noqa: N805
+            return name.lower()
 
 
-NegationsLast = typing.Optional[typing.Literal["group", "eof"]]
+class NegationsLast(StrEnum):
+    """Where to place negating (``!``) entries when sorting."""
+
+    GROUP = enum.auto()
+    EOF = enum.auto()
 
 
 def tidy_file(
     path: pathlib.Path,
     *,
     allow_leading_whitespace: bool = False,
-    negations_last: NegationsLast = None,
+    negations_last: NegationsLast | None = None,
 ) -> None:
     lines = PlainLines.from_file(path)
     if len(lines) < 1:
@@ -46,12 +60,12 @@ def tidy_file(
 def tidy_lines(
     lines: PlainLines,
     allow_leading_whitespace: bool,
-    negations_last: NegationsLast = None,
+    negations_last: NegationsLast | None = None,
 ) -> PlainLines:
     normalised_contents = lines.normalize(allow_leading_whitespace=allow_leading_whitespace)
     sections = normalised_contents.split()
-    if negations_last == "eof":
-        return _sections_with_negations_at_eof(sections).as_plain()
+    if negations_last is NegationsLast.EOF:
+        return sections.with_negations_at_eof().as_plain()
     sorted_sections = Sections(
         tuple(section.sort(negations_last=negations_last) for section in sections),
     )
@@ -60,30 +74,6 @@ def tidy_lines(
 
 def _is_negation(line: str) -> bool:
     return line.startswith("!")
-
-
-def _sections_with_negations_at_eof(sections: Sections) -> Sections:
-    stripped: list[Section] = []
-    collected_negations: list[str] = []
-    for section in sections:
-        kept = [line for line in section.lines.lines if not _is_negation(line)]
-        collected_negations.extend(line for line in section.lines.lines if _is_negation(line))
-        stripped.append(
-            Section(
-                section.header,
-                PlainLines(tuple(sorted(kept)), normalised=True, sorted=True),
-                section.trailing_blanks,
-            ),
-        )
-    if collected_negations:
-        stripped.append(
-            Section(
-                None,
-                PlainLines(tuple(sorted(collected_negations)), normalised=True, sorted=True),
-                trailing_blanks=1,
-            ),
-        )
-    return Sections(tuple(stripped))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -188,8 +178,8 @@ class Section:
     def sorted(self) -> bool:
         return self.lines.sorted
 
-    def sort(self, *, negations_last: NegationsLast = None) -> Section:
-        sorter = self._sort_grouped if negations_last == "group" else self._sort
+    def sort(self, *, negations_last: NegationsLast | None = None) -> Section:
+        sorter = self._sort_grouped if negations_last is NegationsLast.GROUP else self._sort
         return Section(
             self.header,
             PlainLines(sorter(self.lines.lines), normalised=True, sorted=True),
@@ -262,3 +252,33 @@ class Sections:
     def as_plain(self) -> PlainLines:
         lines = list(itertools.chain(*(list(section) for section in self)))
         return PlainLines(lines, normalised=self.normalised, sorted=self.sorted)
+
+    def with_negations_at_eof(self) -> Sections:
+        """
+        Collect every negating entry (leading ``!``) into a single sorted block
+        in a new section after the last one.
+
+        This moves negations relative to other entries, which *can* change the
+        meaning of the ``.gitignore``; it is only used when explicitly requested.
+        """
+        stripped: list[Section] = []
+        collected_negations: list[str] = []
+        for section in self:
+            kept = [line for line in section.lines.lines if not _is_negation(line)]
+            collected_negations.extend(line for line in section.lines.lines if _is_negation(line))
+            stripped.append(
+                Section(
+                    section.header,
+                    PlainLines(tuple(sorted(kept)), normalised=True, sorted=True),
+                    section.trailing_blanks,
+                ),
+            )
+        if collected_negations:
+            stripped.append(
+                Section(
+                    None,
+                    PlainLines(tuple(sorted(collected_negations)), normalised=True, sorted=True),
+                    trailing_blanks=1,
+                ),
+            )
+        return Sections(tuple(stripped))

@@ -4,6 +4,7 @@ import tempfile
 
 import pytest
 
+from gitignore_tidy.core import NegationsLast
 from gitignore_tidy.core import PlainLines
 from gitignore_tidy.core import Section
 from gitignore_tidy.core import Sections
@@ -182,7 +183,7 @@ class TestSection:
     )
     def test_sort_negations_last_group(self, input, expected_output):
         assert _create_section_from_normalised(header=None, lines=input).sort(
-            negations_last="group",
+            negations_last=NegationsLast.GROUP,
         ) == _create_section_from_normalised(header=None, lines=expected_output, sorted=True)
 
     @pytest.mark.parametrize(
@@ -265,7 +266,7 @@ class TestTidyLines:
 
     def test_negations_last_group_keeps_sections(self):
         input = ["# a", "y", "!y/keep", "x", "# b", "build/", "!build/keep/"]
-        assert self.tidy_lines(input, negations_last="group") == [
+        assert self.tidy_lines(input, negations_last=NegationsLast.GROUP) == [
             "# a",
             "x",
             "y",
@@ -277,7 +278,7 @@ class TestTidyLines:
 
     def test_negations_last_eof_collects_all_negations(self):
         input = ["# a", "*.log", "!keep.log", "# b", "build/", "!build/x/"]
-        assert self.tidy_lines(input, negations_last="eof") == [
+        assert self.tidy_lines(input, negations_last=NegationsLast.EOF) == [
             "# a",
             "*.log",
             "# b",
